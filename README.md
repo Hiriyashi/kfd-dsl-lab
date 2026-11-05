@@ -1,34 +1,57 @@
-# Свой DSL
+# DSL для проверки HTTP-ответов
 
-Создайте DSL для проверки HTTP-ответов и перепишите через него шесть функций `check01`–`check06` из `lesson09.legacy`. Новые проверки должны возвращать список расхождений с ожиданиями.
+## Запуск тестов
 
-Полное условие, требования к тестам и необязательное усложнение — в [docs/lesson09.md](docs/lesson09.md).
+    ./gradlew test
 
-## Что уже есть в проекте
+## Пример использования
 
-- `app/src/main/kotlin/lesson09/HttpResponse.kt` — модель ответа.
-- `app/src/main/kotlin/lesson09/legacy/Checks.kt` — шесть исходных проверок.
-- `app/src/main/kotlin/lesson09/support/json/Json.kt` — готовый парсер JSON. Писать свой парсер не нужно.
-- `app/src/test/kotlin/lesson09/LegacySmokeTest.kt` — начальные тесты исходных проверок.
-- `app/src/test/kotlin/lesson09/support/json/JsonParserTest.kt` — тесты готового парсера.
+    val result = validate(response) {
+        status { equalTo(200) }
+        header("Content-Type") { startsWith("application/json") }
+        body { json { field("id") { present() } } }
+    }
 
-Реализацию DSL добавьте в пакет `lesson09.dsl`, свои тесты — в `app/src/test/kotlin/lesson09`. Предоставленные исходники и тесты оставьте без изменений.
+Пользовательский предикат:
 
-## Запуск
+    validate(response) {
+        header("X-Trace") { satisfies("non-blank value") { it.isNotBlank() } }
+    }
 
-Установите JDK 25 и укажите его в `JAVA_HOME`. В IntelliJ IDEA выберите этот же JDK для Gradle JVM. Gradle устанавливать отдельно не нужно: проект использует Wrapper. При первом запуске нужен доступ к интернету для загрузки Gradle и зависимостей.
+## Пример расхождений
 
-В проекте используются Kotlin 2.4.10, Gradle 9.5.1 и JUnit 6.1.3. Запускайте команды из корня репозитория:
+Для HttpResponse(500, {"Content-Type": ["text/plain"]}, "{}"):
 
-| Действие | Bash | PowerShell |
-|---|---|---|
-| Сборка и тесты | `bash ./gradlew build` | `.\gradlew.bat build` |
-| Тесты | `bash ./gradlew :app:test` | `.\gradlew.bat :app:test` |
+    status: expected 200, actual 500
+    headers.Content-Type: expected prefix application/json, actual [text/plain]
+    body.json.id: expected present, actual <missing>
 
-Начальные тесты должны проходить до начала работы. По мере реализации DSL добавляйте собственные тесты из условия задания.
+## Пути
 
-Если продолжаете работу в своём проекте курса, перенесите каталоги `app/src/main/kotlin/lesson09`, `app/src/test/kotlin/lesson09` и файл `docs/lesson09.md`. В модуле должны быть подключены Kotlin/JVM, JUnit Jupiter и `kotlin-test-junit5`, а задача тестирования должна использовать `useJUnitPlatform()`; настройки можно взять из `app/build.gradle.kts` и `gradle/libs.versions.toml`.
+status, headers.<Имя>, body, body.json, body.json.<Поле>.
 
-## Сдача
+## Устройство
 
-Передайте преподавателю ссылку на свой репозиторий. Добавьте в README пример использования DSL, пример расхождений и объяснение решения.
+Получатели и операции:
+
+- ResponseDsl — status, header, body
+- StatusDsl — equalTo(Int)
+- HeaderDsl — equalTo, startsWith, satisfies
+- BodyDsl — absentOrEmpty, notEmpty, json
+- JsonDsl — field
+- FieldDsl — present, equalTo(String/Long/Boolean)
+
+Все получатели помечены @DslMarker (@Dsl): неявно войти во внешний блок
+из внутреннего нельзя, this@validate.status { ... } — можно.
+
+Пользовательский предикат передаётся как (String) -> Boolean в
+satisfies(description, predicate). Подходит литерал лямбды, переменная
+и ссылка на функцию.
+
+Независимость запусков: validate(response) { ... } на каждый вызов
+создаёт новый MutableList<Discrepancy>, поэтому результаты разных
+запусков не пересекаются, а входной HttpResponse только читается.
+
+check01..check06 в lesson09.dsl повторяют условия
+lesson09.legacy.check01..check06 и возвращают ValidationResult;
+тесты сравнивают legacy(r) == dsl(r).isSuccess на одинаковых данных.
